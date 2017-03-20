@@ -43,6 +43,12 @@ preferences {
     section("Set color temperature while dimming? (optional)") {
     	input "optionColorTemp", "number", title: "Which? (2700-6500)", required: false
     }
+    section("If lights are already off, turn this light on instead (optional)") {
+    	input "bulbToTurnOn", "capability.switchLevel", required: false, multiple: true, title: "Which?"
+    }
+    section("Set the above light to what value? (optional)") {
+    	input "bulbOnLevel", "number", title: "Brightness (1-100)", required: false
+    }
 }
 
 def installed() {
@@ -58,38 +64,54 @@ def updated() {
 
 def initialize() {
 	subscribe(trigger, "button.pushed", buttonHandler)
+	subscribe(trigger, "button.on", buttonHandler)
+	subscribe(trigger, "button.off", buttonHandler)
 }
 
 def buttonHandler(evt) {
 	log.debug "in buttonHandler method"
     log.debug "button is ${evt.value}"
 	if (evt.value == offState) {
-    	log.debug "about to run dimBulbs method"
+    	log.debug "button turned off"
 		checkSchedule()
 	} else if (evt.value == onState) {
-    	log.debug "about to run turnBulbsOn method"
+    	log.debug "button turned on"
 		turnBulbsOn()
 	}
 }
 
 def checkSchedule() {
-    if (fromTime && toTime) {
-    	def between = timeOfDayIsBetween(fromTime, toTime, new Date(), location.timeZone)
-        if (between) {
-        	log.debug "Event occurred within the scheduled times. Start dimming the bulbs."
-        	dimBulbs()
-        } else {
-        	log.debug "Event occurred outside the scheduled times. Just turn the bulbs off."
-            bulbsToDim.off()
-        }
+    def currSwitches = bulbsToDim.currentSwitch
+    def onSwitches = currSwitches.findAll { switchVal ->
+        switchVal == "on" ? true : false
+    }
+    if (onSwitches.size() == 0 && bulbToTurnOn && bulbOnLevel) {
+    	log.debug "all bulbs are off. turning selected bulb(s) on."
+        bulbToTurnOn.setLevel(bulbOnLevel)
+        bulbToTurnOn.on()
     } else {
-        log.debug "fromTime and toTime were not set, so dimming bulbs anyway."
-        dimBulbs()
+	    if (fromTime && toTime) {
+	    	def between = timeOfDayIsBetween(fromTime, toTime, new Date(), location.timeZone)
+	        if (between) {
+	        	log.debug "Event occurred within the scheduled times. Start dimming the bulbs."
+	        	dimBulbs()
+	        } else {
+	        	log.debug "Event occurred outside the scheduled times. Just turn the bulbs off."
+	            bulbsToDim.off()
+	        }
+	    } else {
+	        log.debug "fromTime and toTime were not set, so dimming bulbs anyway."
+	        dimBulbs()
+	    }
     }
 }
 
 def dimBulbs() {
-    bulbsToDim.setLevel(1)
+	bulbsToDim.each { bulb ->
+	    if ( bulb.currentState("level").value.toInteger() > 1 ) {
+    		bulb.setLevel(1)
+        }
+    }
     if (optionColorTemp) {
         log.debug "Setting color temperature to ${optionColorTemp}"
         bulbsToDim.setColorTemperature(optionColorTemp)
